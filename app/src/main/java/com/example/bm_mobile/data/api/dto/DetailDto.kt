@@ -84,6 +84,7 @@ data class ProduktDetailDto(
     val lokalizacja: String?,
     val magazynNazwa: String?,
     val stan: Double,
+    val firmaNazwa: String?,
     val tagNfcId: String?,
     val tagNfcType: String?,
     val ruchy: List<ProduktRuchDto>,

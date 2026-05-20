@@ -9,10 +9,20 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.bm_mobile.data.api.dto.ProduktDetailDto
 import com.example.bm_mobile.ui.nfc.NfcEvent
+import com.example.bm_mobile.ui.nfc.NfcTagProtection
 import com.example.bm_mobile.ui.nfc.NfcViewModel
+import java.security.MessageDigest
+
+private const val REMOVE_TAG_HASH = "cda3bc635c368c37c5d8bd3952e2ef889af1bf5bea791544d44e875e654bed63"
+
+private fun sha256(input: String): String {
+    val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+    return bytes.joinToString("") { "%02x".format(it) }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -34,6 +44,7 @@ fun ProduktKartaScreen(
             when (event) {
                 is NfcEvent.TagAssigned -> if (event.produktId == produktId) viewModel.loadProdukt(produktId)
                 is NfcEvent.TagRemoved  -> if (event.produktId == produktId) viewModel.loadProdukt(produktId)
+
                 else -> {}
             }
         }
@@ -157,9 +168,32 @@ private fun ProduktNaglowek(p: ProduktDetailDto) {
 
 @Composable
 private fun NfcSekcja(p: ProduktDetailDto, nfcVm: NfcViewModel) {
-    Surface(
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-    ) {
+    var showRemoveDialog  by remember { mutableStateOf(false) }
+    var showProtectDialog by remember { mutableStateOf(false) }
+
+    if (showRemoveDialog) {
+        UsunTagDialog(
+            onConfirm = { nfcVm.removeTag(p.id); showRemoveDialog = false },
+            onDismiss = { showRemoveDialog = false }
+        )
+    }
+
+    if (showProtectDialog) {
+        WybierzOchroneDialog(
+            onConfirm = { protection ->
+                nfcVm.startAssignMode(
+                    produktId    = p.id,
+                    produktNazwa = p.nazwa,
+                    firmaNazwa   = p.firmaNazwa ?: "BM",
+                    protection   = protection,
+                )
+                showProtectDialog = false
+            },
+            onDismiss = { showProtectDialog = false }
+        )
+    }
+
+    Surface(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)) {
         Row(
             Modifier
                 .fillMaxWidth()
@@ -181,25 +215,146 @@ private fun NfcSekcja(p: ProduktDetailDto, nfcVm: NfcViewModel) {
                     }
                 }
                 TextButton(
-                    onClick = { nfcVm.removeTag(p.id) },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Usuń tag")
-                }
+                    onClick = { showRemoveDialog = true },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Usuń tag") }
             } else {
                 Text(
                     "Brak tagu NFC",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                TextButton(onClick = { nfcVm.startAssignMode(p.id) }) {
-                    Text("Przypisz tag")
-                }
+                TextButton(onClick = { showProtectDialog = true }) { Text("Przypisz tag") }
             }
         }
     }
+}
+
+@Composable
+private fun WybierzOchroneDialog(
+    onConfirm: (NfcTagProtection) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var selected by remember { mutableStateOf(NfcTagProtection.NONE) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Zabezpieczenie tagu NFC") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Na tagu zostaną zapisane: nazwa firmy, narzędzia i data przypisania.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(8.dp))
+                OchronaOption(
+                    label       = "Bez zabezpieczenia",
+                    description = "Tag można ponownie zapisać dowolną aplikacją",
+                    selected    = selected == NfcTagProtection.NONE,
+                    onClick     = { selected = NfcTagProtection.NONE }
+                )
+                OchronaOption(
+                    label       = "Hasłem (chroniony zapis)",
+                    description = "Odczyt swobodny, nadpisanie wymaga hasła aplikacji",
+                    selected    = selected == NfcTagProtection.PASSWORD,
+                    onClick     = { selected = NfcTagProtection.PASSWORD }
+                )
+                OchronaOption(
+                    label       = "Trwała blokada (tylko odczyt)",
+                    description = "Tag staje się niemodyfikowalny na zawsze — nieodwracalne!",
+                    selected    = selected == NfcTagProtection.READONLY,
+                    onClick     = { selected = NfcTagProtection.READONLY }
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(selected) }) { Text("Przypisz i skanuj") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Anuluj") }
+        }
+    )
+}
+
+@Composable
+private fun OchronaOption(
+    label: String,
+    description: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer
+                else MaterialTheme.colorScheme.surface,
+        shape = MaterialTheme.shapes.small,
+        tonalElevation = if (selected) 0.dp else 1.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            RadioButton(selected = selected, onClick = onClick)
+            Column {
+                Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Text(description, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun UsunTagDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    var haslo by remember { mutableStateOf("") }
+    var blad by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Potwierdzenie usunięcia") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "Podaj hasło administratora, aby odpiąć tag NFC.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                OutlinedTextField(
+                    value = haslo,
+                    onValueChange = { haslo = it; blad = false },
+                    label = { Text("Hasło") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    isError = blad,
+                    supportingText = if (blad) {{ Text("Nieprawidłowe hasło") }} else null,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (sha256(haslo) == REMOVE_TAG_HASH) {
+                        onConfirm()
+                    } else {
+                        blad = true
+                        haslo = ""
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text("Usuń tag")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Anuluj") }
+        }
+    )
 }
 
 @Composable

@@ -28,11 +28,13 @@ import com.example.bm_mobile.data.api.dto.PojazdDto
 import com.example.bm_mobile.data.repository.AuthRepository
 import com.example.bm_mobile.ui.login.LoginScreen
 import com.example.bm_mobile.ui.login.LoginViewModel
+import com.example.bm_mobile.ui.login.WelcomeScreen
 import com.example.bm_mobile.ui.magazyn.MagazynDashboardScreen
 import com.example.bm_mobile.ui.magazyn.MagazynListScreen
 import com.example.bm_mobile.ui.magazyn.MagazynViewModel
 import com.example.bm_mobile.ui.nfc.NfcEvent
 import com.example.bm_mobile.ui.nfc.NfcMode
+import com.example.bm_mobile.ui.nfc.NfcTagProtection
 import com.example.bm_mobile.ui.nfc.NfcViewModel
 import com.example.bm_mobile.ui.pojazd.PojazdKartaScreen
 import com.example.bm_mobile.ui.pojazd.PojazdListScreen
@@ -86,17 +88,21 @@ class MainActivity : ComponentActivity() {
         setContent {
             BmmobileTheme {
                 var isLoggedIn by remember { mutableStateOf(authRepo.isLoggedIn()) }
+                var showLogin by remember { mutableStateOf(false) }
 
-                if (!isLoggedIn) {
-                    val loginVm: LoginViewModel = viewModel(
-                        factory = LoginViewModel.factory(authRepo)
-                    )
-                    LoginScreen(loginVm) { isLoggedIn = true }
-                } else {
-                    MainScaffold(onLogout = {
+                when {
+                    isLoggedIn -> MainScaffold(onLogout = {
                         authRepo.logout()
                         isLoggedIn = false
+                        showLogin = false
                     })
+                    showLogin -> {
+                        val loginVm: LoginViewModel = viewModel(
+                            factory = LoginViewModel.factory(authRepo)
+                        )
+                        LoginScreen(loginVm) { isLoggedIn = true }
+                    }
+                    else -> WelcomeScreen(onLoginClick = { showLogin = true })
                 }
             }
         }
@@ -133,7 +139,7 @@ class MainActivity : ComponentActivity() {
             }
             val tagId   = tag?.id?.joinToString("") { "%02X".format(it) }
             val tagType = tag?.techList?.firstOrNull()?.substringAfterLast('.')
-            if (tagId != null) nfcVm.handleTag(tagId, tagType)
+            if (tag != null && tagId != null) nfcVm.handleTag(tag, tagId, tagType)
         }
     }
 }
@@ -167,7 +173,16 @@ private fun MainScaffold(onLogout: () -> Unit) {
                 is NfcEvent.Error -> scope.launch {
                     snackbarHostState.showSnackbar(event.message)
                 }
-                else -> { /* TagAssigned / TagRemoved obsługiwane w ProduktKartaScreen */ }
+                is NfcEvent.TagAssigned -> scope.launch {
+                    val ndefInfo = if (event.ndefOk) "" else " (nie zapisano danych na tagu)"
+                    val protInfo = when (event.protectionResult) {
+                        true  -> " · tag zabezpieczony"
+                        false -> " · UWAGA: zabezpieczenie nie powiodło się"
+                        null  -> ""
+                    }
+                    snackbarHostState.showSnackbar("Tag przypisany$ndefInfo$protInfo")
+                }
+                else -> { /* TagRemoved obsługiwany w ProduktKartaScreen */ }
             }
         }
     }
@@ -209,7 +224,11 @@ private fun MainScaffold(onLogout: () -> Unit) {
 
         // Baner trybu przypisywania NFC
         if (nfcMode is NfcMode.WaitingForAssign) {
-            NfcAssignBanner(onCancel = { nfcVm.cancelAssignMode() })
+            NfcAssignBanner(
+                produktNazwa = (nfcMode as NfcMode.WaitingForAssign).produktNazwa,
+                protection   = (nfcMode as NfcMode.WaitingForAssign).protection,
+                onCancel     = { nfcVm.cancelAssignMode() },
+            )
             return@Scaffold
         }
 
@@ -338,7 +357,16 @@ private fun MainScaffold(onLogout: () -> Unit) {
 }
 
 @Composable
-private fun NfcAssignBanner(onCancel: () -> Unit) {
+private fun NfcAssignBanner(
+    produktNazwa: String,
+    protection: NfcTagProtection,
+    onCancel: () -> Unit,
+) {
+    val protectionLabel = when (protection) {
+        NfcTagProtection.NONE     -> "Dane zostaną zapisane na tagu"
+        NfcTagProtection.PASSWORD -> "Tag zostanie zabezpieczony hasłem"
+        NfcTagProtection.READONLY -> "Tag zostanie trwale zablokowany (tylko odczyt)"
+    }
     Surface(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surfaceVariant
@@ -351,8 +379,15 @@ private fun NfcAssignBanner(onCancel: () -> Unit) {
             Text("📡", style = MaterialTheme.typography.displayLarge)
             Spacer(Modifier.height(16.dp))
             Text("Przyłóż telefon do tagu NFC", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(4.dp))
             Text(
-                "Tag zostanie przypisany do narzędzia",
+                produktNazwa,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                protectionLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

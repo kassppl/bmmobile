@@ -107,6 +107,29 @@ object NfcTagWriter {
         }
     }
 
+    /**
+     * Odczytuje tag i porównuje z oczekiwanym tekstem NDEF.
+     * Zwraca true jeśli dane na tagu zgadzają się z tym co zapisano.
+     */
+    fun verifyNdef(tag: Tag, expectedText: String): Boolean {
+        return try {
+            val ndef = Ndef.get(tag) ?: return false
+            ndef.connect()
+            val msg = ndef.ndefMessage
+            ndef.close()
+            if (msg == null) return false
+            msg.records.any { record ->
+                if (record.tnf != NdefRecord.TNF_WELL_KNOWN) return@any false
+                if (!record.type.contentEquals(NdefRecord.RTD_TEXT)) return@any false
+                // Format rekordu tekstowego: [status byte][język bytes][tekst UTF-8]
+                val payload   = record.payload
+                val langLen   = payload[0].toInt() and 0x3F
+                val text      = String(payload, langLen + 1, payload.size - langLen - 1, Charsets.UTF_8)
+                text == expectedText
+            }
+        } catch (_: Exception) { false }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private data class NtagConfig(

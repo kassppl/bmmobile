@@ -100,9 +100,12 @@ class NfcViewModel(private val api: ApiService) : ViewModel() {
                 return@launch
             }
 
-            val ndefOk = ndefError == null
+            // Weryfikacja zapisu — odczyt z tagu potwierdza że dane są na miejscu
+            val ndefOk = ndefError == null && withContext(Dispatchers.IO) {
+                NfcTagWriter.verifyNdef(tag, ndefText)
+            }
 
-            // Ochrona tagu tylko po potwierdzeniu zapisu NDEF
+            // Ochrona tagu tylko po pomyślnej weryfikacji zapisu NDEF
             val protectionResult: Boolean? = if (!ndefOk || mode.protection == NfcTagProtection.NONE) {
                 null
             } else {

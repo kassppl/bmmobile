@@ -175,10 +175,10 @@ private fun MainScaffold(onLogout: () -> Unit) {
                 }
                 is NfcEvent.TagAssigned -> scope.launch {
                     val ndefInfo = if (event.ndefOk) "" else " (nie zapisano danych na tagu)"
-                    val protInfo = when (event.protectionResult) {
+                    val protInfo = when (event.protectionOk) {
                         true  -> " · tag zabezpieczony"
                         false -> " · UWAGA: zabezpieczenie nie powiodło się"
-                        null  -> ""
+                        else  -> ""
                     }
                     snackbarHostState.showSnackbar("Tag przypisany$ndefInfo$protInfo")
                 }

@@ -35,6 +35,7 @@ sealed class NfcMode {
 }
 
 sealed class NfcEvent {
+
     data class NavigateToProduct(val produktId: Int) : NfcEvent()
     data class TagAssigned(val produktId: Int, val ndefOk: Boolean, val protectionOk: Boolean?) : NfcEvent()
     data class TagRemoved(val produktId: Int) : NfcEvent()
@@ -101,14 +102,16 @@ class NfcViewModel(private val api: ApiService) : ViewModel() {
 
             val ndefOk = ndefError == null
 
-            // Ochrona tagu (jeśli wybrana) — tag powinien być nadal w zasięgu
-            val protectionResult: Boolean? = when (mode.protection) {
-                NfcTagProtection.NONE     -> null
-                NfcTagProtection.PASSWORD -> withContext(Dispatchers.IO) {
-                    NfcTagWriter.setPasswordProtection(tag, tagId) == null
-                }
-                NfcTagProtection.READONLY -> withContext(Dispatchers.IO) {
-                    NfcTagWriter.makeReadOnly(tag) == null
+            // Ochrona tagu tylko po potwierdzeniu zapisu NDEF
+            val protectionResult: Boolean? = if (!ndefOk || mode.protection == NfcTagProtection.NONE) {
+                null
+            } else {
+                withContext(Dispatchers.IO) {
+                    when (mode.protection) {
+                        NfcTagProtection.PASSWORD -> NfcTagWriter.setPasswordProtection(tag, tagId) == null
+                        NfcTagProtection.READONLY -> NfcTagWriter.makeReadOnly(tag) == null
+                        NfcTagProtection.NONE     -> null
+                    }
                 }
             }
 
